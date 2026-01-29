@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: php-app
+  template:
+    metadata:
+      labels:
+        app: php-app
+    spec:
+      containers:
+      - name: php-app
+        image: php:8.2-apache # 웹 서버(Apache)가 포함된 이미지
+        ports:
+        - containerPort: 80
+        env:
+        - name: DB_HOST
+          valueFrom: { secretKeyRef: { name: mysql-auth, key: host } }
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: mysql-auth, key: username } }
+        - name: DB_PASS
+          valueFrom: { secretKeyRef: { name: mysql-auth, key: password } }
+        - name: DB_NAME
+          value: "example_database"
+        # 컨테이너 시작 시 DB 접속 코드가 담긴 index.php를 생성
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            docker-php-ext-install mysqli;
+            echo "<?php
+            \$conn = new mysqli(getenv('DB_HOST'), getenv('DB_USER'), getenv('DB_PASS'), getenv('DB_NAME'));
+            if (\$conn->connect_error) { die('DB 연결 실패'); }
+            
+            echo '<h1>🚀 실제 RDS 데이터 조회 성공!</h1>';
+            \$res = \$conn->query('SELECT * FROM users');
+            while(\$row = \$res->fetch_assoc()) { 
+                echo '<p>ID: ' . \$row['id'] . ' | 이름: ' . \$row['name'] . ' | 이메일: ' . \$row['email'] . '</p>'; 
+            }
+            ?>" > /var/www/html/index.php;
+            apache2-foreground
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-app-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    app: php-app
